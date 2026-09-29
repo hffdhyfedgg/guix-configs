@@ -1,0 +1,111 @@
+# ~/.config/starship/starship.toml
+
+add_newline = false
+# Таймауты: 500ms и 15ms — золотая середина для слабых и мощных ПК.
+command_timeout = 500
+scan_timeout = 15
+
+# Левая часть: информация + перенос строки + символ ввода
+format = "$all$line_break$character"
+# Правая часть: время выполнения предыдущей команды (решает проблему 2)
+right_format = "$cmd_duration"
+
+continuation_prompt = "[▶](bold purple) "
+
+palette = "catppuccin_mocha"
+
+[palettes.catppuccin_mocha]
+rosewater = "#f5e0dc"
+flamingo = "#f2cdcd"
+pink = "#f5c2e7"
+mauve = "#cba6f7"
+red = "#f38ba8"
+maroon = "#eba0ac"
+peach = "#fab387"
+yellow = "#f9e2af"
+green = "#a6e3a1"
+teal = "#94e2d5"
+sky = "#89dceb"
+sapphire = "#74c7ec"
+blue = "#89b4fa"
+lavender = "#b4befe"
+text = "#cdd6f4"
+subtext1 = "#bac2de"
+subtext0 = "#a6adc8"
+overlay2 = "#9399b2"
+overlay1 = "#7f849c"
+overlay0 = "#6c7086"
+surface2 = "#585b70"
+surface1 = "#45475a"
+surface0 = "#313244"
+base = "#1e1e2e"
+mantle = "#181825"
+crust = "#11111b"
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol = "[❯](bold red)"
+vimcmd_symbol = "[❮](bold green)"
+
+[directory]
+style = "fg:sapphire bold"
+read_only = " 󰌾"
+read_only_style = "fg:red"
+truncation_length = 3
+truncate_to_repo = true
+format = "[$path]($style)[$read_only]($read_only_style) "
+
+[git_branch]
+symbol = " "
+style = "fg:mauve"
+format = "[$symbol$branch]($style) "
+
+[git_status]
+style = "fg:peach"
+format = '([\[$all_status$ahead_behind\]]($style) )'
+conflicted = "="
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕"
+untracked = "?${count}"
+stashed = "*${count}"
+modified = "!${count}"
+staged = "+${count}"
+renamed = "»${count}"
+deleted = "✘${count}"
+
+[git_state]
+style = "fg:maroon"
+format = '[\($state( $progress_current of $progress_total)\)]($style) '
+
+[package]
+symbol = "󰏗 "
+style = "fg:yellow"
+format = "[$symbol$version]($style) "
+
+[nix_shell]
+symbol = " "
+style = "fg:blue"
+format = "[$symbol$name]($style) "
+
+[cmd_duration]
+min_time = 2000
+style = "fg:overlay1"
+format = "[$duration]($style) "
+
+[status]
+disabled = false
+symbol = "󰅚 "
+style = "fg:red bold"
+format = '[$symbol$status]($style) '
+
+[jobs]
+symbol = "󰒡 "
+style = "fg:blue"
+format = "[$symbol$number]($style) "
+
+[time]
+disabled = false
+time_format = "%H:%M"
+style = "fg:overlay0"
+format = "[$time]($style) "

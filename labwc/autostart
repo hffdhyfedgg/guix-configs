@@ -1,0 +1,10 @@
+#!/bin/sh
+# Панель
+waybar &
+
+# Порталы (пакеты должны быть установлены; вызываются по имени из PATH)
+xdg-desktop-portal &
+xdg-desktop-portal-wlr &
+
+# Буфер обмена — только если поставили менеджер (например cliphist):
+# wl-paste --watch cliphist store &

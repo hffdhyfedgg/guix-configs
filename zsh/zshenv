@@ -1,0 +1,16 @@
+# ~/.zshenv
+# Читается для всех запусков zsh: интерактивных, неинтерактивных, скриптов.
+
+# XDG-каталоги
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+export XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+
+# Не дублировать элементы в путевых массивах.
+# В zsh массивы вида path связаны с переменными окружения вида PATH.
+typeset -U path fpath manpath infopath ld_library_path
+
+# Guix Home профиль должен быть виден даже если оболочка запущена не как login.
+if [[ -d "$HOME/.guix-home/profile/bin" ]]; then
+  path=("$HOME/.guix-home/profile/bin" $path)
+fi

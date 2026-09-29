@@ -1,0 +1,268 @@
+# ~/.zshrc
+# Интерактивная оболочка.
+
+[[ -o interactive ]] || return 0
+
+# ---------------------------------------------------------------------------
+# Оптимизация (Performance Mode)
+# ---------------------------------------------------------------------------
+typeset -g WEAK_PC=${WEAK_PC:-1}
+
+# ---------------------------------------------------------------------------
+# XDG-каталоги
+# ---------------------------------------------------------------------------
+: "${XDG_CONFIG_HOME:=$HOME/.config}"
+: "${XDG_CACHE_HOME:=$HOME/.cache}"
+: "${XDG_STATE_HOME:=$HOME/.local/state}"
+
+mkdir -p "$XDG_STATE_HOME/zsh" "$XDG_CACHE_HOME/zsh"
+
+# ---------------------------------------------------------------------------
+# Базовые опции zsh
+# ---------------------------------------------------------------------------
+setopt AUTO_CD
+setopt AUTO_PUSHD
+setopt PUSHD_IGNORE_DUPS
+setopt PUSHD_SILENT
+setopt EXTENDED_GLOB
+setopt GLOB_DOTS
+setopt INTERACTIVE_COMMENTS
+setopt PROMPT_SUBST
+
+# ---------------------------------------------------------------------------
+# История
+# ---------------------------------------------------------------------------
+HISTFILE="$XDG_STATE_HOME/zsh/history"
+if (( WEAK_PC )); then
+  HISTSIZE=10000
+  SAVEHIST=10000
+else
+  HISTSIZE=100000
+  SAVEHIST=100000
+fi
+
+setopt APPEND_HISTORY
+setopt INC_APPEND_HISTORY
+setopt SHARE_HISTORY
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_IGNORE_SPACE
+setopt HIST_REDUCE_BLANKS
+setopt HIST_FCNTL_LOCK
+
+# ---------------------------------------------------------------------------
+# Клавиши
+# ---------------------------------------------------------------------------
+bindkey -e
+
+if zmodload zsh/terminfo 2>/dev/null; then
+  [[ -n "${terminfo[khome]:-}" ]] && bindkey "${terminfo[khome]}" beginning-of-line
+  [[ -n "${terminfo[kend]:-}"  ]] && bindkey "${terminfo[kend]}"  end-of-line
+  [[ -n "${terminfo[kdch1]:-}" ]] && bindkey "${terminfo[kdch1]}" delete-char
+fi
+
+bindkey '^[[H'    beginning-of-line
+bindkey '^[[F'    end-of-line
+bindkey '^[OH'    beginning-of-line
+bindkey '^[OF'    end-of-line
+bindkey '^[[1~'   beginning-of-line
+bindkey '^[[4~'   end-of-line
+bindkey '^[[7~'   beginning-of-line
+bindkey '^[[8~'   end-of-line
+bindkey '^[[3~'   delete-char
+bindkey '^[[1;5D' backward-word
+bindkey '^[[1;5C' forward-word
+bindkey '^[[1;5A' history-beginning-search-backward
+bindkey '^[[1;5B' history-beginning-search-forward
+
+# ---------------------------------------------------------------------------
+# Guix-профили и пути для completion
+# ---------------------------------------------------------------------------
+typeset -U path fpath
+typeset -ga _guix_profiles
+_guix_profiles=(
+  "$HOME/.guix-home/profile"
+  "$HOME/.guix-profile"
+  "/run/current-system/profile"
+)
+
+for profile in ${_guix_profiles[@]}; do
+  for d in "$profile"/share/zsh/site-functions "$profile"/share/zsh/vendor-completions; do
+    [[ -d "$d" ]] && fpath+=("$d")
+  done
+done
+
+# ---------------------------------------------------------------------------
+# Цвета для ls / eza / completion
+# ---------------------------------------------------------------------------
+if [[ -z "$LS_COLORS" ]] && command -v dircolors >/dev/null 2>&1; then
+  eval "$(dircolors -b)"
+fi
+
+# ---------------------------------------------------------------------------
+# Completion (Оптимизация кэша)
+# ---------------------------------------------------------------------------
+autoload -Uz compinit
+# На слабых ПК используем кэш, если он новее 24 часов (убирает фриз при запуске)
+if [[ -n "$XDG_CACHE_HOME/zsh/compdump-${ZSH_VERSION}"(#qN.mh+24) ]]; then
+  compinit -d "$XDG_CACHE_HOME/zsh/compdump-${ZSH_VERSION}"
+else
+  compinit -C -d "$XDG_CACHE_HOME/zsh/compdump-${ZSH_VERSION}"
+fi
+
+zstyle ':completion:*' use-cache yes
+zstyle ':completion:*' cache-path "$XDG_CACHE_HOME/zsh/compcache"
+zstyle ':completion:*' completer _complete _ignored _approximate
+zstyle ':completion:*' menu select
+zstyle ':completion:*' list-colors ${(s.:.)LS_COLORS}
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Z}' 'r:|=*' 'l:|=* r:|=*'
+zstyle ':completion:*:descriptions' format '%F{cyan}-- %d --%f'
+zstyle ':completion:*:warnings' format '%F{red}-- нет кандидатов --%f'
+zstyle ':completion:*:*:cd:*' tag-order local-directories directory-stack path-directories
+
+# ---------------------------------------------------------------------------
+# Helper для подключения плагинов из Guix-профилей
+# ---------------------------------------------------------------------------
+_guix_source_plugin() {
+  local name=$1 profile f
+  local -a tries
+  for profile in ${_guix_profiles[@]}; do
+    tries=(
+      "$profile/share/zsh/plugins/$name/$name.plugin.zsh"
+      "$profile/share/zsh/plugins/$name/$name.zsh"
+      "$profile/share/zsh/$name/$name.plugin.zsh"
+      "$profile/share/zsh/$name/$name.zsh"
+      "$profile/share/$name/$name.plugin.zsh"
+      "$profile/share/$name/$name.zsh"
+      "$profile/share/zsh/plugins/$name/"*.plugin.zsh(N.)
+      "$profile/share/zsh/plugins/$name/"*.zsh(N.)
+      "$profile/share/$name/"*.plugin.zsh(N.)
+      "$profile/share/$name/"*.zsh(N.)
+    )
+    for f in ${(u)tries[@]}; do
+      if [[ -f "$f" ]]; then
+        source "$f"
+        return 0
+      fi
+    done
+  done
+  print -u2 "zshrc: не найден плагин: $name"
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Плагины
+# ---------------------------------------------------------------------------
+_guix_source_plugin fzf-tab
+zstyle ':fzf-tab:*' switch-group ',' '.'
+zstyle ':fzf-tab:*' fzf-command fzf
+zstyle ':fzf-tab:complete:cd:*' fzf-preview '[[ -d $realpath ]] && eza --color=always --icons $realpath'
+
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=#6c7086'
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=30
+_guix_source_plugin zsh-autosuggestions
+
+ZSH_HIGHLIGHT_HIGHLIGHTERS=(main brackets pattern)
+if (( WEAK_PC )); then
+  # На слабых ПК ограничиваем длину, чтобы вставка длинных команд не фризила терминал
+  ZSH_HIGHLIGHT_MAXLENGTH=128
+else
+  ZSH_HIGHLIGHT_MAXLENGTH=512
+fi
+typeset -gA ZSH_HIGHLIGHT_STYLES
+ZSH_HIGHLIGHT_STYLES[command]='fg=green,bold'
+ZSH_HIGHLIGHT_STYLES[builtin]='fg=green,bold'
+ZSH_HIGHLIGHT_STYLES[function]='fg=green,bold'
+ZSH_HIGHLIGHT_STYLES[alias]='fg=cyan,bold'
+ZSH_HIGHLIGHT_STYLES[path]='fg=cyan'
+ZSH_HIGHLIGHT_STYLES[globbing]='fg=magenta'
+ZSH_HIGHLIGHT_STYLES[unknown-token]='fg=red,bold'
+_guix_source_plugin zsh-syntax-highlighting
+
+# ---------------------------------------------------------------------------
+# fzf, zoxide, atuin, starship
+# ---------------------------------------------------------------------------
+export FZF_DEFAULT_OPTS='--height=40% --layout=reverse --border --info=inline'
+if command -v fzf >/dev/null 2>&1; then
+  if fzf --zsh >/dev/null 2>&1; then
+    eval "$(fzf --zsh)"
+  else
+    for profile in ${_guix_profiles[@]}; do
+      [[ -f "$profile/share/fzf/completion.zsh" ]] && source "$profile/share/fzf/completion.zsh"
+      [[ -f "$profile/share/fzf/key-bindings.zsh" ]] && source "$profile/share/fzf/key-bindings.zsh"
+    done
+  fi
+fi
+
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init zsh --cmd z)"
+fi
+
+if command -v atuin >/dev/null 2>&1; then
+  eval "$(atuin init zsh)"
+fi
+
+if command -v starship >/dev/null 2>&1; then
+  eval "$(starship init zsh)"
+fi
+
+# ---------------------------------------------------------------------------
+# Алиасы
+# ---------------------------------------------------------------------------
+
+# --- eza (замена ls) ---
+alias ls='eza --group-directories-first'
+alias ll='eza -l --group-directories-first --git --icons'
+alias la='eza -la --group-directories-first --git --icons'
+alias lt='eza --tree --level=2 --icons'
+alias tree='eza --tree --icons'
+
+# --- trash-cli (замена rm) ---
+# В upstream trash-cli основная команда для удаления — trash-put.
+# (Если в Guix-пакете он переименован в просто 'trash', замени 'trash-put' на 'trash').
+alias rm='trash-put'
+alias rmls='trash-list'       # Посмотреть, что в корзине
+alias rmres='trash-restore'   # Интерактивно восстановить из корзины
+alias rmempty='trash-empty'   # Очистить корзину
+
+# --- fd (замена find) ---
+alias find='fd'
+
+# --- bat (замена cat) ---
+# ВАЖНО: --paging=never нужен, чтобы bat не зависал при использовании в пайпах (|)
+# и вел себя как обычный cat при перенаправлении вывода.
+alias cat='bat --paging=never'
+
+# --- plocate (замена locate) ---
+alias locate='plocate'
+# Примечание: чтобы plocate работал, базу нужно обновлять.
+# В Guix для этого обычно используется команда plocate-build (или системный сервис).
+
+# --- ripgrep (замена grep) ---
+# Оставляем стандартный grep для скриптов (так как флаги rg и grep отличаются),
+# но добавляем удобный алиас для самого ripgrep.
+alias grep='grep --color=auto'
+alias rg='rg --color=auto'
+
+# --- Прочее ---
+alias cls='printf "\033[H\033[2J\033[3J"'
+
+# ---------------------------------------------------------------------------
+# Transient Prompt (Исправленный)
+# ---------------------------------------------------------------------------
+# Используем \r\e[2K, чтобы стереть ТОЛЬКО текущую строку ввода.
+# Это не поднимает курсор выше (\e[1A), поэтому вывод прошлых команд НЕ затирается.
+_transient_prompt_accept_line() {
+  local cmd=$BUFFER
+  # Очищаем текущую строку ввода
+  print -rn -- $'\r\e[2K'
+
+  # Печатаем минимальный символ приглашения и команду
+  if [[ -n "$cmd" ]]; then
+    print -rn -- "> $cmd"
+  fi
+
+  # Выполняем команду (zsh сам переведет курсор на новую строку для вывода)
+  zle .accept-line
+}
+zle -N accept-line _transient_prompt_accept_line

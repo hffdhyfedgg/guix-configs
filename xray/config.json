@@ -1,0 +1,35 @@
+{
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 59999,
+      "protocol": "socks",
+      "settings": {}
+    },
+    {
+      "listen": "127.0.0.1",
+      "port": 59998,
+      "protocol": "http",
+      "settings": {}
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "socks",
+      "settings": {
+        "servers": [
+          {
+            "address": "10.127.7.82",
+            "port": 10808,
+            "users": [
+              {
+                "user": "v2_457e3dfe",
+                "pass": "d794ba43f5b5486e"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "layer": "top",
+  "position": "top",
+  "height": 32,
+
+  "modules-left":   ["wlr/workspaces"],
+  "modules-center": ["clock"],
+  "modules-right":  ["network", "pulseaudio", "battery", "tray"],
+
+  "wlr/workspaces": {
+    "format": "{icon}",
+    "format-icons": {
+      "active": "●",
+      "default": "○"
+    }
+  },
+
+  "clock": {
+    "format": "{:%H:%M  %d.%m}",
+    "timezone": "Europe/Moscow"
+  },
+
+  "network": {
+    "format-wifi": " {signalStrength}% {essid}",
+    "format-ethernet": " {ipaddr}",
+    "format-disconnected": "✗ offline",
+    "tooltip-format": "{ifname}: {ipaddr}/{cidr}\n{bandwidthUpBits} ↑  {bandwidthDownBits} ↓",
+    "on-click": "nm-connection-editor",
+    "on-click-right": "alacritty -e nmtui"
+  },
+
+  "pulseaudio": {
+    "format": " {volume}%",
+    "on-click": "pavucontrol"
+  },
+
+  "battery": {
+    "states": { "warning": 20, "critical": 5 },
+    "format": "{icon} {capacity}%",
+    "format-icons": ["", "", "", "", ""]
+  },
+
+  "tray": {
+    "spacing": 8
+  }
+}
