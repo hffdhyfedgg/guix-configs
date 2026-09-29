@@ -103,10 +103,12 @@ fi
 # ---------------------------------------------------------------------------
 autoload -Uz compinit
 # На слабых ПК используем кэш, если он новее 24 часов (убирает фриз при запуске)
-if [[ -n "$XDG_CACHE_HOME/zsh/compdump-${ZSH_VERSION}"(#qN.mh+24) ]]; then
-  compinit -d "$XDG_CACHE_HOME/zsh/compdump-${ZSH_VERSION}"
-else
+if [[ -n "$XDG_CACHE_HOME/zsh/compdump-${ZSH_VERSION}"(#qN.mh-24) ]]; then
+  # Кэш свежий (моложе 24 часов), используем его
   compinit -C -d "$XDG_CACHE_HOME/zsh/compdump-${ZSH_VERSION}"
+else
+  # Кэш старый или отсутствует, пересоздаём
+  compinit -d "$XDG_CACHE_HOME/zsh/compdump-${ZSH_VERSION}"
 fi
 
 zstyle ':completion:*' use-cache yes
