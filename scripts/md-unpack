@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""
+unpack_code_blocks.py
+
+Парсит поток с markdown-блоками кода и раскладывает
+содержимое по файлам. Путь к файлу берётся из первой строки
+блока (строка-комментарий).
+
+Источник по умолчанию — стандартный ввод (stdin).
+Флаг -f / --file переключает на чтение из файла.
+
+Использование:
+    cat dump.md | python unpack_code_blocks.py -o ./project
+    python unpack_code_blocks.py -f dump.md -o ./project
+    python unpack_code_blocks.py -f dump.md --dry-run
+"""
+
+import argparse
+import os
+import re
+import sys
+from pathlib import Path
+
+# ──────────────────────────────────────────────
+# 1. Распознавание «строки-пути» в комментарии
+# ──────────────────────────────────────────────
+
+_PATH_PATTERNS: list[tuple[re.Pattern, int]] = [
+    # <!-- path -->
+    (re.compile(r"^\s*<!--\s*(.+?)\s*-->\s*$"), 1),
+    # /* path */
+    (re.compile(r"^\s*/\*\s*(.+?)\s*\*/\s*$"), 1),
+    # // path
+    (re.compile(r"^\s*//\s*(.+?)\s*$"), 1),
+    # # path
+    (re.compile(r"^\s*#\s*(.+?)\s*$"), 1),
+    # -- path
+    (re.compile(r"^\s*--\s*(.+?)\s*$"), 1),
+    # % path
+    (re.compile(r"^\s*%\s*(.+?)\s*$"), 1),
+    # ; path
+    (re.compile(r"^\s*;\s*(.+?)\s*$"), 1),
+]
+
+
+def extract_path(line: str) -> str | None:
+    """Возвращает путь из строки-комментария или None."""
+    for pattern, group in _PATH_PATTERNS:
+        m = pattern.match(line)
+        if m:
+            return m.group(group).strip()
+    return None
+
+
+# ──────────────────────────────────────────────
+# 2. Разбиение текста на блоки кода
+# ──────────────────────────────────────────────
+
+_BLOCK_RE = re.compile(
+    r"^```([^\n]*)\n"
+    r"(.*?)"
+    r"^```\s*$",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def parse_blocks(text: str) -> list[dict]:
+    results = []
+    for m in _BLOCK_RE.finditer(text):
+        lang = m.group(1).strip()
+        body = m.group(2)
+
+        lines = body.split("\n")
+        if not lines:
+            continue
+
+        file_path = extract_path(lines[0])
+        if file_path is None:
+            continue
+
+        content = "\n".join(lines[1:])
+        if content.startswith("\n"):
+            content = content[1:]
+
+        results.append({"lang": lang, "path": file_path, "body": content})
+
+    return results
+
+
+# ──────────────────────────────────────────────
+# 3. Запись файлов на диск
+# ──────────────────────────────────────────────
+
+def write_files(blocks: list[dict], out_dir: Path, dry_run: bool) -> None:
+    for blk in blocks:
+        target = out_dir / blk["path"]
+
+        if dry_run:
+            print(f"  [dry] {target}")
+            continue
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(blk["body"], encoding="utf-8")
+        print(f"  ✓ {target}")
+
+
+# ──────────────────────────────────────────────
+# 4. Чтение источника: файл или stdin
+# ──────────────────────────────────────────────
+
+def read_source(file_path: str | None) -> str:
+    """
+    Если file_path задан — читаем файл.
+    Иначе читаем стандартный ввод (stdin).
+    """
+    if file_path is not None:
+        p = Path(file_path)
+        if not p.is_file():
+            sys.exit(f"Ошибка: файл не найден: {p}")
+        return p.read_text(encoding="utf-8")
+
+    # stdin: читаем всё, что пришло в поток
+    if sys.stdin.isatty():
+        sys.exit(
+            "Ошибка: вход не задан.\n"
+            "  Либо передайте файл:  -f dump.md\n"
+            "  Либо подайте поток:  cat dump.md | ..."
+        )
+    return sys.stdin.read()
+
+
+# ──────────────────────────────────────────────
+# 5. Точка входа
+# ──────────────────────────────────────────────
+
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description=(
+            "Распаковывает файлы из markdown-блоков кода.\n"
+            "По умолчанию читает стандартный ввод (stdin)."
+        ),
+    )
+    ap.add_argument(
+        "-f", "--file",
+        default=None,
+        metavar="PATH",
+        help="Читать из файла вместо stdin",
+    )
+    ap.add_argument(
+        "-o", "--output",
+        default=".",
+        metavar="DIR",
+        help="Корневой каталог для записи (по умолчанию — текущий)",
+    )
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Только показать, что будет создано, не писать на диск",
+    )
+    args = ap.parse_args()
+
+    text = read_source(args.file)
+    blocks = parse_blocks(text)
+
+    if not blocks:
+        print("Блоков с путями не найдено.")
+        return
+
+    print(f"Найдено файлов: {len(blocks)}\n")
+    write_files(blocks, Path(args.output), args.dry_run)
+    print("\nГотово.")
+
+
+if __name__ == "__main__":
+    main()
