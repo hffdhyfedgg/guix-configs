@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""md-gen — сбор файлов проекта в единый поток с гибкой фильтрацией и форматированием.
+
+Вывод по умолчанию в stdout. Служебная информация — в stderr и только с --verbose.
+"""
+
 import argparse
 import os
 import re
@@ -8,11 +13,10 @@ from pathlib import Path
 try:
     import yaml
 except ImportError:
-    print(
-        "! Ошибка: Не установлена библиотека pyyaml.\nФайл конфигурации не может быть прочитан.\nВыполните: pip install pyyaml если требуется."
-    )
+    yaml = None
 
-# Стандартные расширения файлов кода
+# ── константы ────────────────────────────────────────────────────────────────
+
 DEFAULT_EXTENSIONS = (
     ".py",
     ".rs",
@@ -48,7 +52,6 @@ DEFAULT_EXTENSIONS = (
     ".scm",
 )
 
-# Шаблоны regex для обязательного включения (парсятся всегда, независимо от расширения)
 DEFAULT_INCLUDE_PATTERNS = [
     r"^Dockerfile(\..+)?$",
     r"^Makefile$",
@@ -56,7 +59,6 @@ DEFAULT_INCLUDE_PATTERNS = [
     r"^\.dockerignore$",
 ]
 
-# Шаблоны regex для обязательного исключения (игнорируются всегда)
 DEFAULT_EXCLUDE_PATTERNS = [
     r"^\.git(/|$)",
     r"^__pycache__(/|$)",
@@ -71,233 +73,186 @@ DEFAULT_EXCLUDE_PATTERNS = [
     r"^build(/|$)",
 ]
 
+FORMATS = {
+    "markdown": {
+        "tree_open": "## Дерево проекта\n\n```\n",
+        "tree_close": "\n```\n\n---\n\n",
+        "file_open": "#### Файл: `{filename}`\n\n```{lang}\n",
+        "file_close": "\n```\n",
+        "file_sep": "\n---\n\n",
+    },
+    "plain": {
+        "tree_open": "",
+        "tree_close": "\n\n",
+        "file_open": "=== {relpath} ===\n",
+        "file_close": "\n",
+        "file_sep": "\n",
+    },
+    "xml": {
+        "tree_open": "<tree>\n",
+        "tree_close": "\n</tree>\n\n",
+        "file_open": '<file name="{relpath}" lang="{lang}">\n',
+        "file_close": "\n</file>\n",
+        "file_sep": "\n",
+    },
+}
 
-def load_config(config_path: Path) -> dict:
-    """Загружает настройки из YAML-файла."""
-    if not config_path.exists():
+EXT_LANG = {
+    ".py": "python",
+    ".rs": "rust",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".jsx": "jsx",
+    ".tsx": "tsx",
+    ".c": "c",
+    ".cpp": "cpp",
+    ".h": "c",
+    ".hpp": "cpp",
+    ".java": "java",
+    ".go": "go",
+    ".rb": "ruby",
+    ".php": "php",
+    ".swift": "swift",
+    ".kt": "kotlin",
+    ".scala": "scala",
+    ".html": "html",
+    ".css": "css",
+    ".sql": "sql",
+    ".json": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
+    ".xml": "xml",
+    ".md": "markdown",
+    ".sh": "bash",
+    ".scm": "scheme",
+}
+
+
+# ── утилиты ──────────────────────────────────────────────────────────────────
+
+
+def load_config(path: Path) -> dict:
+    if yaml is None or not path.exists():
         return {}
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
         return data if isinstance(data, dict) else {}
 
 
 def compile_patterns(patterns: list[str]) -> list[re.Pattern]:
-    """Компилирует строковые шаблоны в объекты regex."""
     compiled = []
     for p in patterns:
         try:
             compiled.append(re.compile(p))
         except re.error as e:
-            print(f"⚠️ Ошибка в регулярном выражении '{p}': {e}")
+            print(f"⚠ Ошибка в шаблоне '{p}': {e}", file=sys.stderr)
     return compiled
 
 
-def is_hidden(rel_path: str) -> bool:
-    """Проверяет, является ли путь скрытым (любой компонент начинается с точки)."""
-    return any(part.startswith(".") for part in Path(rel_path).parts)
+def is_hidden(rel: str) -> bool:
+    return any(part.startswith(".") for part in Path(rel).parts)
+
+
+def get_lang(filename: str) -> str:
+    return EXT_LANG.get(Path(filename).suffix.lower(), "")
+
+
+def parse_size(s: str) -> int:
+    s = s.strip().upper()
+    if s.isdigit():
+        return int(s)
+    for unit, mult in (
+        ("GB", 1024**3),
+        ("G", 1024**3),
+        ("MB", 1024**2),
+        ("M", 1024**2),
+        ("KB", 1024),
+        ("K", 1024),
+        ("B", 1),
+    ):
+        if s.endswith(unit):
+            num = s[: -len(unit)]
+            if num.isdigit():
+                return int(num) * mult
+    raise ValueError(f"Некорректный размер: {s}")
+
+
+def apply_template(tpl: str, filename: str, relpath: str, lang: str) -> str:
+    return (
+        tpl.replace("{filename}", filename)
+        .replace("{relpath}", relpath)
+        .replace("{lang}", lang)
+    )
+
+
+def decode_escapes(s: str) -> str:
+    return s.replace("\\n", "\n").replace("\\t", "\t")
+
+
+# ── фильтрация ───────────────────────────────────────────────────────────────
 
 
 def is_allowed(
-    rel_path: str,
+    rel: str,
     is_dir: bool,
     include_hidden: bool,
-    inc_regexes: list[re.Pattern],
-    exc_regexes: list[re.Pattern],
+    inc: list[re.Pattern],
+    exc: list[re.Pattern],
     extensions: tuple[str, ...],
     include_no_ext: bool = False,
 ) -> bool:
-    """
-    Единая функция фильтрации для дерева и сбора файлов.
-    Возвращает True, если путь должен быть обработан.
-    """
-    # Нормализуем разделители для Windows, чтобы regex работал предсказуемо
-    norm_path = rel_path.replace("\\", "/")
-
-    # 1. Скрытые файлы/директории
-    if not include_hidden and is_hidden(norm_path):
+    norm = rel.replace("\\", "/")
+    if not include_hidden and is_hidden(norm):
         return False
-
-    # 2. Явные исключения (regex)
-    if any(r.search(norm_path) for r in exc_regexes):
+    if any(r.search(norm) for r in exc):
         return False
-
-    # 3. Директории: если не исключены, разрешаем обход
     if is_dir:
         return True
-
-    # 4. Файлы: проверяем явное включение (regex)
-    if any(r.search(norm_path) for r in inc_regexes):
+    if any(r.search(norm) for r in inc):
         return True
-
-    # 5. Файлы: проверяем расширение
-    if norm_path.lower().endswith(extensions):
+    if extensions and norm.lower().endswith(extensions):
         return True
-
-    # 6. Файлы без расширения, если флаг включён
-    if include_no_ext and Path(norm_path).suffix == "":
+    if include_no_ext and Path(norm).suffix == "":
         return True
-
     return False
 
 
-def generate_tree(
-    root_dir: Path,
-    include_hidden: bool,
-    inc_regexes: list[re.Pattern],
-    exc_regexes: list[re.Pattern],
-    extensions: tuple[str, ...],
-    include_no_ext: bool = False,
-) -> str:
-    """Генерирует дерево проекта, применяя те же фильтры, что и при сборе файлов."""
-
-    def walk_tree(current_path: Path, prefix: str = "") -> list[str]:
-        result = []
-        try:
-            items = sorted(
-                current_path.iterdir(), key=lambda x: (x.is_file(), x.name.lower())
-            )
-        except PermissionError:
-            return [f"{prefix}└── [Нет доступа]"]
-
-        visible_items = []
-        for item in items:
-            rel = str(item.relative_to(root_dir)).replace("\\", "/")
-            if is_allowed(
-                rel,
-                item.is_dir(),
-                include_hidden,
-                inc_regexes,
-                exc_regexes,
-                extensions,
-                include_no_ext,
-            ):
-                visible_items.append(item)
-
-        for i, item in enumerate(visible_items):
-            is_last = i == len(visible_items) - 1
-            connector = "└── " if is_last else "├── "
-            name_suffix = "/" if item.is_dir() else ""
-            result.append(f"{prefix}{connector}{item.name}{name_suffix}")
-
-            if item.is_dir():
-                next_prefix = prefix + ("    " if is_last else "│   ")
-                result.extend(walk_tree(item, next_prefix))
-
-        return result
-
-    tree_lines = [f"{root_dir.name}/"]
-    tree_lines.extend(walk_tree(root_dir))
-    return "\n".join(tree_lines)
+# ── сбор файлов ──────────────────────────────────────────────────────────────
 
 
-def get_language_from_extension(filepath: str) -> str:
-    """Возвращает идентификатор языка для подсветки синтаксиса в markdown."""
-    ext_map = {
-        ".py": "python",
-        ".rs": "rust",
-        ".js": "javascript",
-        ".ts": "typescript",
-        ".jsx": "jsx",
-        ".tsx": "tsx",
-        ".c": "c",
-        ".cpp": "cpp",
-        ".h": "c",
-        ".hpp": "cpp",
-        ".java": "java",
-        ".go": "go",
-        ".rb": "ruby",
-        ".php": "php",
-        ".swift": "swift",
-        ".kt": "kotlin",
-        ".scala": "scala",
-        ".html": "html",
-        ".css": "css",
-        ".sql": "sql",
-        ".json": "json",
-        ".yaml": "yaml",
-        ".yml": "yaml",
-        ".toml": "toml",
-        ".xml": "xml",
-        ".md": "markdown",
-    }
-    return ext_map.get(Path(filepath).suffix.lower(), "")
-
-
-def parse_size(size_str: str) -> int:
-    """Преобразует строку размера (например, '1MB', '500K') в количество байт."""
-    size_str = size_str.strip().upper()
-    if size_str.isdigit():
-        return int(size_str)
-    units = {
-        "B": 1,
-        "K": 1024,
-        "KB": 1024,
-        "M": 1024 ** 2,
-        "MB": 1024 ** 2,
-        "G": 1024 ** 3,
-        "GB": 1024 ** 3,
-    }
-    for unit, mult in units.items():
-        if size_str.endswith(unit):
-            num_part = size_str[: -len(unit)]
-            if num_part.isdigit():
-                return int(num_part) * mult
-    raise ValueError(f"Некорректный формат размера: {size_str}")
-
-
-def collect_files_and_structure(
+def collect_files(
     src_dir: Path,
-    output_file: Path,
-    extensions: tuple[str, ...],
-    include_hidden: bool,
-    include_tree: bool,
-    inc_regexes: list[re.Pattern],
-    exc_regexes: list[re.Pattern],
-    include_no_ext: bool = False,
-    max_size_bytes: int = None,
-    ignore_size_limit_exts: set = None,
-) -> int:
-    """Собирает файлы в один markdown-документ."""
+    extensions,
+    include_hidden,
+    inc,
+    exc,
+    include_no_ext,
+    max_size_bytes=None,
+    ignore_size_limit_exts=None,
+    verbose=False,
+):
+    """Обходит src_dir. Возвращает (список обработанных файлов, множество всех прошедших фильтр путей)."""
     if ignore_size_limit_exts is None:
         ignore_size_limit_exts = set()
 
-    md_content = "# Структура файлов проекта\n\n"
+    collected = []  # [(relpath, filename, content), ...]
+    filtered_paths = []  # все пути, прошедшие фильтр (для --full-tree)
+    skipped = 0
 
-    if include_tree:
-        tree = generate_tree(
-            src_dir,
-            include_hidden,
-            inc_regexes,
-            exc_regexes,
-            extensions,
-            include_no_ext,
-        )
-        md_content += "## Дерево проекта\n\n```\n"
-        md_content += f"{tree}\n```\n\n---\n\n"
-
-    total_files = 0
-    skipped_by_size = 0
     all_dirs = []
-
-    # Собираем все директории для сортировки и стабильного порядка
     for root, dirs, files in os.walk(src_dir):
         root_path = Path(root)
         rel_root = str(root_path.relative_to(src_dir)).replace("\\", "/")
+        if rel_root == ".":
+            rel_root = ""
 
-        # Проверяем, разрешён ли обход этой директории
-        if not is_allowed(
-            rel_root,
-            True,
-            include_hidden,
-            inc_regexes,
-            exc_regexes,
-            extensions,
-            include_no_ext,
+        if rel_root and not is_allowed(
+            rel_root, True, include_hidden, inc, exc, extensions, include_no_ext
         ):
-            dirs[:] = []  # Прекращаем обход вглубь
+            dirs[:] = []
             continue
 
-        # Фильтруем поддиректории для os.walk
         dirs[:] = [
             d
             for d in dirs
@@ -305,243 +260,268 @@ def collect_files_and_structure(
                 f"{rel_root}/{d}".lstrip("/"),
                 True,
                 include_hidden,
-                inc_regexes,
-                exc_regexes,
+                inc,
+                exc,
                 extensions,
                 include_no_ext,
             )
         ]
         all_dirs.append((root_path, rel_root, files))
 
-    # Сортируем директории для детерминированного вывода
     all_dirs.sort(key=lambda x: x[1])
 
     for root_path, rel_root, files in all_dirs:
-        depth = len(Path(rel_root).parts) if rel_root != "." else 0
-        header_level = max(2, depth + 2)
-        header_prefix = "#" * header_level
-        dir_name = root_path.name if root_path.name else root_path.parent.name
-
-        md_content += f"{header_prefix} Директория: `{dir_name}`\n\n"
-
-        dir_files = []
-        for file in files:
-            rel_file = f"{rel_root}/{file}".lstrip("/")
-            if is_allowed(
-                rel_file,
-                False,
-                include_hidden,
-                inc_regexes,
-                exc_regexes,
-                extensions,
-                include_no_ext,
+        for fname in sorted(files):
+            rel = f"{rel_root}/{fname}".lstrip("/") if rel_root else fname
+            if not is_allowed(
+                rel, False, include_hidden, inc, exc, extensions, include_no_ext
             ):
-                # Проверка размера
-                file_path = root_path / file
-                ext = file_path.suffix.lower()
-                if max_size_bytes is not None and ext not in ignore_size_limit_exts:
-                    try:
-                        file_size = file_path.stat().st_size
-                        if file_size > max_size_bytes:
-                            print(
-                                f"⚠️ Пропущен файл {rel_file} (размер {file_size} байт > {max_size_bytes})"
-                            )
-                            skipped_by_size += 1
-                            continue
-                    except OSError as e:
-                        print(f"⚠️ Не удалось определить размер {rel_file}: {e}")
-                        continue
-                dir_files.append((file, file_path))
-                total_files += 1
+                continue
 
-        if dir_files:
-            md_content += f"Найдено {len(dir_files)} файл(ов):\n\n"
-            dir_files.sort(key=lambda x: x[0])
+            filtered_paths.append(rel)
+            fpath = root_path / fname
+            ext = fpath.suffix.lower()
 
-            for filename, filepath in dir_files:
-                file_header_level = header_level + 1
+            if max_size_bytes is not None and ext not in ignore_size_limit_exts:
                 try:
-                    with open(filepath, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    md_content += f"{'#' * file_header_level} Файл: `{filename}`\n\n"
-                    md_content += f"```{get_language_from_extension(filename)}\n{content}\n```\n\n---\n\n"
-                except Exception as e:
-                    md_content += f"{'#' * file_header_level} Файл: `{filename}`\n\n"
-                    md_content += f"❌ Ошибка чтения: {e}\n\n---\n\n"
-        else:
-            md_content += "Нет подходящих файлов.\n\n"
+                    if fpath.stat().st_size > max_size_bytes:
+                        if verbose:
+                            print(f"⚠ Пропущен {rel} (размер)", file=sys.stderr)
+                        skipped += 1
+                        continue
+                except OSError:
+                    continue
 
-    # Создаём родительские директории для выходного файла, если их нет
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_file, "w", encoding="utf-8") as f:
-        f.write(md_content)
+            try:
+                content = fpath.read_text(encoding="utf-8")
+            except Exception as e:
+                content = f"❌ Ошибка чтения: {e}"
 
-    print(f"✅ Создан файл: {output_file.resolve()}")
-    print(f"📊 Всего обработано файлов: {total_files}")
-    if skipped_by_size:
-        print(f"🚫 Пропущено из-за ограничения размера: {skipped_by_size}")
-    return total_files
+            collected.append((rel, fname, content))
+
+    if verbose:
+        print(f"Файлов обработано: {len(collected)}", file=sys.stderr)
+        if skipped:
+            print(f"Пропущено по размеру: {skipped}", file=sys.stderr)
+
+    return collected, filtered_paths
+
+
+# ── дерево ───────────────────────────────────────────────────────────────────
+
+
+def build_tree(src_dir_name: str, paths: list[str]) -> str:
+    """Строит дерево из списка относительных путей."""
+    tree: dict = {}
+    for p in paths:
+        node = tree
+        for part in Path(p).parts:
+            node = node.setdefault(part, {})
+
+    def render(node: dict, prefix: str = "") -> list[str]:
+        dirs = sorted((k for k, v in node.items() if v), key=str.lower)
+        files = sorted((k for k, v in node.items() if not v), key=str.lower)
+        ordered = dirs + files
+        lines = []
+        for i, name in enumerate(ordered):
+            last = i == len(ordered) - 1
+            conn = "└── " if last else "├── "
+            suf = "/" if node[name] else ""
+            lines.append(f"{prefix}{conn}{name}{suf}")
+            if node[name]:
+                lines.extend(render(node[name], prefix + ("    " if last else "│   ")))
+        return lines
+
+    return "\n".join([f"{src_dir_name}/"] + render(tree))
+
+
+# ── main ─────────────────────────────────────────────────────────────────────
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Сбор исходного кода проекта в единый markdown-файл с учётом гибких правил фильтрации."
-    )
-    parser.add_argument("src_dir", type=str, help="Путь к директории с исходниками")
-    parser.add_argument("output_file", type=str, help="Путь к выходному markdown-файлу")
-    parser.add_argument(
-        "--conf",
-        type=str,
+    ap = argparse.ArgumentParser(description="Сбор файлов проекта в единый поток.")
+    ap.add_argument("src_dir", help="Директория-источник")
+    ap.add_argument(
+        "output_file",
+        nargs="?",
         default=None,
-        help="Путь к YAML-конфигу (по умолчанию: md_gen_conf.yml рядом со скриптом)",
+        help="Выходной файл (по умолчанию: stdout)",
     )
-    parser.add_argument(
+    ap.add_argument("--conf", default=None)
+    ap.add_argument(
         "--ext",
-        type=str,
         default=None,
-        help="Расширения через запятую (переопределяет конфиг)",
+        help="Расширения через запятую. Пустая строка отключает фильтр по расширению",
     )
-    parser.add_argument(
-        "--include",
-        type=str,
-        default=None,
-        help="Regex-шаблоны для включения через запятую (переопределяет конфиг)",
+    ap.add_argument(
+        "--include", default=None, help="Regex-шаблоны включения через запятую"
     )
-    parser.add_argument(
-        "--exclude",
-        type=str,
-        default=None,
-        help="Regex-шаблоны для исключения через запятую (переопределяет конфиг)",
+    ap.add_argument(
+        "--exclude", default=None, help="Regex-шаблоны исключения через запятую"
     )
-    parser.add_argument(
-        "--include-hidden",
+    ap.add_argument("--include-hidden", action="store_true")
+    ap.add_argument("--include-no-ext", action="store_true")
+    ap.add_argument("--no-tree", action="store_true", help="Не выводить дерево")
+    ap.add_argument(
+        "--full-tree",
         action="store_true",
-        help="Включать скрытые файлы и директории",
+        help="Не обрезать дерево до обработанных файлов",
     )
-    parser.add_argument(
-        "--no-tree",
-        action="store_true",
-        help="Не генерировать дерево проекта в начале файла",
+    ap.add_argument("--max-size", default=None)
+    ap.add_argument("--ignore-size-limit-ext", default=None)
+    ap.add_argument(
+        "--format",
+        default="markdown",
+        choices=["markdown", "plain", "xml"],
+        help="Предустановленный формат вывода",
     )
-    parser.add_argument(
-        "--include-no-ext",
-        action="store_true",
-        help="Включать файлы без расширения (например, Makefile, Dockerfile)",
-    )
-    parser.add_argument(
-        "--max-size",
-        type=str,
+    ap.add_argument(
+        "--file-open",
         default=None,
-        help="Максимальный размер файла (например, 1MB, 500K). Файлы больше лимита пропускаются",
+        help="Шаблон перед файлом. Плейсхолдеры: {filename} {relpath} {lang}",
     )
-    parser.add_argument(
-        "--ignore-size-limit-ext",
-        type=str,
-        default=None,
-        help="Расширения через запятую, для которых не применяется ограничение размера (например, .log,.txt)",
+    ap.add_argument("--file-close", default=None, help="Шаблон после файла")
+    ap.add_argument("--file-sep", default=None, help="Разделитель между файлами")
+    ap.add_argument(
+        "--verbose", action="store_true", help="Служебная информация в stderr"
     )
 
-    args = parser.parse_args()
+    args = ap.parse_args()
 
-    # 1. Загрузка конфига
-    config_path = (
+    # ── конфиг ──
+    cfg_path = (
         Path(args.conf) if args.conf else Path(__file__).parent / "md_gen_conf.yml"
     )
-    file_config = load_config(config_path)
+    file_cfg = load_config(cfg_path)
 
-    # 2. Базовые настройки
-    settings = {
-        "extensions": DEFAULT_EXTENSIONS,
-        "include_patterns": DEFAULT_INCLUDE_PATTERNS,
-        "exclude_patterns": DEFAULT_EXCLUDE_PATTERNS,
-        "include_hidden": False,
-        "include_tree": True,
-        "include_no_ext": False,
-        "max_size": None,          # может быть int или строка
-        "ignore_size_limit_exts": [],
-    }
+    ext = DEFAULT_EXTENSIONS
+    inc_p = DEFAULT_INCLUDE_PATTERNS
+    exc_p = DEFAULT_EXCLUDE_PATTERNS
+    include_hidden = False
+    include_no_ext = False
+    max_size_raw = None
+    ignore_ext = []
 
-    # 3. Применяем конфиг из файла
-    for key in settings:
-        if key in file_config:
-            settings[key] = file_config[key]
+    for k, v in file_cfg.items():
+        if k == "extensions":
+            ext = tuple(v)
+        elif k == "include_patterns":
+            inc_p = v
+        elif k == "exclude_patterns":
+            exc_p = v
+        elif k == "include_hidden":
+            include_hidden = v
+        elif k == "include_no_ext":
+            include_no_ext = v
+        elif k == "max_size":
+            max_size_raw = v
+        elif k == "ignore_size_limit_exts":
+            ignore_ext = v
 
-    # 4. Переопределяем флагами CLI (только если флаг явно передан)
     if args.ext is not None:
-        settings["extensions"] = tuple(e.strip() for e in args.ext.split(","))
+        ext = tuple(e.strip() for e in args.ext.split(",") if e.strip())
     if args.include is not None:
-        settings["include_patterns"] = [p.strip() for p in args.include.split(",")]
+        inc_p = [p.strip() for p in args.include.split(",") if p.strip()]
     if args.exclude is not None:
-        settings["exclude_patterns"] = [p.strip() for p in args.exclude.split(",")]
+        exc_p = [p.strip() for p in args.exclude.split(",") if p.strip()]
     if args.include_hidden:
-        settings["include_hidden"] = True
-    if args.no_tree:
-        settings["include_tree"] = False
+        include_hidden = True
     if args.include_no_ext:
-        settings["include_no_ext"] = True
+        include_no_ext = True
     if args.max_size is not None:
-        settings["max_size"] = args.max_size
+        max_size_raw = args.max_size
     if args.ignore_size_limit_ext is not None:
-        settings["ignore_size_limit_exts"] = [
-            e.strip() for e in args.ignore_size_limit_ext.split(",")
-        ]
+        ignore_ext = [e.strip() for e in args.ignore_size_limit_ext.split(",")]
 
-    # Преобразуем max_size в байты (если задан)
     max_size_bytes = None
-    if settings["max_size"] is not None:
+    if max_size_raw is not None:
         try:
-            if isinstance(settings["max_size"], int):
-                max_size_bytes = settings["max_size"]
-            else:
-                max_size_bytes = parse_size(str(settings["max_size"]))
+            max_size_bytes = (
+                int(max_size_raw)
+                if isinstance(max_size_raw, int)
+                else parse_size(str(max_size_raw))
+            )
         except ValueError as e:
-            print(f"❌ Ошибка в --max-size: {e}")
+            print(f"❌ {e}", file=sys.stderr)
             sys.exit(1)
 
-    ignore_size_limit_exts = set()
-    for ext in settings["ignore_size_limit_exts"]:
-        # нормализуем: если расширение не начинается с точки, добавляем
-        ext = ext.strip()
-        if ext and not ext.startswith("."):
-            ext = f".{ext}"
-        ignore_size_limit_exts.add(ext.lower())
+    ignore_exts = set()
+    for e in ignore_ext:
+        e = e.strip()
+        if e and not e.startswith("."):
+            e = f".{e}"
+        ignore_exts.add(e.lower())
 
-    # Валидация путей
-    src_path = Path(args.src_dir).resolve()
-    if not src_path.is_dir():
-        print(f"❌ Ошибка: Директория источника не существует: {src_path}")
+    src = Path(args.src_dir).resolve()
+    if not src.is_dir():
+        print(f"❌ Не директория: {src}", file=sys.stderr)
         sys.exit(1)
 
-    out_path = Path(args.output_file).resolve()
+    inc = compile_patterns(inc_p)
+    exc = compile_patterns(exc_p)
 
-    # Компиляция regex
-    inc_regexes = compile_patterns(settings["include_patterns"])
-    exc_regexes = compile_patterns(settings["exclude_patterns"])
+    if args.verbose:
+        print(f"Источник: {src}", file=sys.stderr)
+        if max_size_bytes:
+            print(f"Макс. размер: {max_size_bytes}", file=sys.stderr)
 
-    print(f"🚀 Источник: {src_path}")
-    print(f"💾 Вывод: {out_path}")
-    print(
-        f"📜 Конфиг: {config_path if config_path.exists() else 'не найден (используются defaults)'}"
+    # ── сбор ──
+    collected, filtered_paths = collect_files(
+        src,
+        ext,
+        include_hidden,
+        inc,
+        exc,
+        include_no_ext,
+        max_size_bytes,
+        ignore_exts,
+        args.verbose,
     )
-    if max_size_bytes:
-        print(f"📏 Максимальный размер файла: {max_size_bytes} байт")
-        if ignore_size_limit_exts:
-            print(f"🔓 Игнорировать ограничение для расширений: {', '.join(ignore_size_limit_exts)}")
-    print("-" * 60)
 
-    collect_files_and_structure(
-        src_dir=src_path,
-        output_file=out_path,
-        extensions=tuple(settings["extensions"]),
-        include_hidden=settings["include_hidden"],
-        include_tree=settings["include_tree"],
-        inc_regexes=inc_regexes,
-        exc_regexes=exc_regexes,
-        include_no_ext=settings["include_no_ext"],
-        max_size_bytes=max_size_bytes,
-        ignore_size_limit_exts=ignore_size_limit_exts,
-    )
+    # ── формат ──
+    fmt = dict(FORMATS[args.format])
+    if args.file_open is not None:
+        fmt["file_open"] = decode_escapes(args.file_open)
+    if args.file_close is not None:
+        fmt["file_close"] = decode_escapes(args.file_close)
+    if args.file_sep is not None:
+        fmt["file_sep"] = decode_escapes(args.file_sep)
+
+    # ── дерево ──
+    tree_text = None
+    if not args.no_tree:
+        tree_paths = filtered_paths if args.full_tree else [r for r, _, _ in collected]
+        if tree_paths:
+            tree_text = build_tree(src.name, tree_paths)
+
+    # ── вывод ──
+    out = []
+
+    if tree_text:
+        out.append(fmt["tree_open"])
+        out.append(tree_text)
+        out.append(fmt["tree_close"])
+
+    for i, (rel, fname, content) in enumerate(collected):
+        lang = get_lang(fname)
+        out.append(apply_template(fmt["file_open"], fname, rel, lang))
+        out.append(content)
+        out.append(fmt["file_close"])
+        if i < len(collected) - 1:
+            out.append(fmt["file_sep"])
+
+    result = "".join(out)
+
+    if args.output_file:
+        out_path = Path(args.output_file).resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(result, encoding="utf-8")
+        if args.verbose:
+            print(f"Записано: {out_path}", file=sys.stderr)
+    else:
+        sys.stdout.write(result)
 
 
 if __name__ == "__main__":
     main()
+
