@@ -1,0 +1,7 @@
+# Запись роли для design/floor1/glossary.yaml -> roles
+name: ""
+description: ""
+aliases: []
+status: draft                  # draft | confirmed | deprecated
+source_refs: []                # SRC-NNN или устойчивая ссылка
+notes: []

@@ -1,0 +1,23 @@
+# design/floor2/diagrams/string/STR-NNN.yaml
+id: "STR-XXX"
+title: ""
+purpose: ""
+wires:
+  - id: "w_in"
+    entity: ""
+    direction: input             # input | output | state | effect | error
+    notes: ""
+boxes:
+  - id: "box_1"
+    action: ""                  # glossary.actions key or documented external operation
+    inputs: ["w_in"]
+    outputs: []
+    preconditions: []
+    postconditions: []
+    effects: []
+    nondeterminism: []
+composition: ""
+covers: []
+source_refs: []
+status: draft
+unresolved: []

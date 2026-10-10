@@ -1,0 +1,26 @@
+# design/floor2/requirements/REQ-NNN.yaml
+id: "REQ-XXX"
+title: ""
+type: structural              # structural | predicative | negative
+statement: ""
+covers:
+  - story: "US-XXX"
+    part: both                 # precondition | postcondition | both
+    argument: ""
+entities: []                   # glossary.entities keys
+actions: []                   # glossary.actions keys; may be empty
+dom: project                   # glossary entity key
+formalization:
+  status: informal             # informal | semi_formal | formal
+  constraints: []               # CON-NNN list; empty until constraints are created
+  diagrams: []                 # COMM-NNN / STR-NNN where relevant
+status: draft
+source_refs: []
+priority: must                 # must | should | could
+unresolved: []
+related: []
+acceptance_criteria: []
+verification:
+  status: not_run              # not_run | passed | failed | blocked | waived
+  method: ""
+  evidence: []

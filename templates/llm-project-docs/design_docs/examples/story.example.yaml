@@ -1,0 +1,18 @@
+# Учебный пример; SOURCE_REF — условный идентификатор.
+id: "US-EXAMPLE-001"
+type: atomic
+role: operator
+object: config_file
+action: edit
+precondition:
+  - "Файл конфигурации существует и доступен для записи."
+so_that: "Изменённые допустимые параметры сохраняются и используются приложением при следующем запуске."
+motivation_type: consequence
+rationale: "Оператор может настраивать поведение приложения без изменения кода."
+source_refs: ["SRC-EXAMPLE-001"]
+priority: must
+status: confirmed
+related: []
+unresolved:
+  - "Схема допустимых параметров не определена в этом примере."
+composed_of: []

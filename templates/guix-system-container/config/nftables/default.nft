@@ -1,0 +1,49 @@
+#!/usr/sbin/nft -f
+
+# Базовый набор правил для системного контейнера.
+#
+# Для режима "весь трафик через прокси/шлюз" можно:
+# 1) разрешить только нужный порт прокси/шлюза;
+# 2) запретить прямой выход наружу;
+# 3) оставить только локальный трафик.
+
+flush ruleset
+
+table inet filter {
+    chain input {
+        type filter hook input priority filter; policy accept;
+
+        ct state established,related accept
+        iif "lo" accept
+
+        # Пример: разрешить только внутренний шлюз
+        # ip saddr 10.0.0.1 accept
+
+        # Пример: разрешить только 2222, если включили SSH
+        # tcp dport 2222 accept
+
+        # Пример: запретить всё остальное
+        # counter drop
+    }
+
+    chain forward {
+        type filter hook forward priority filter; policy drop;
+    }
+
+    chain output {
+        type filter hook output priority filter; policy accept;
+
+        ct state established,related accept
+
+        # Для режима "только прокси/шлюз":
+        # разрешаем только прокси на шлюзе
+        # ip daddr 10.0.0.1 tcp dport { 3128, 8080, 1080 } accept
+
+        # Разрешаем DNS на шлюз, если там крутится resolver
+        # ip daddr 10.0.0.1 udp dport 53 accept
+        # ip daddr 10.0.0.1 tcp dport 53 accept
+
+        # Запрещаем всё остальное
+        # counter drop
+    }
+}

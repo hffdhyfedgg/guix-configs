@@ -1,0 +1,24 @@
+# design/floor2/diagrams/comm/COMM-NNN.yaml
+id: "COMM-XXX"
+title: ""
+purpose: ""
+objects:
+  - id: "obj_a"
+    entity: ""
+    description: ""
+morphisms:
+  - id: "f"
+    from: "obj_a"
+    to: "obj_b"
+    action: ""                # glossary action key or documented external relation
+    type_signature: ""
+    requirements: []
+commutativity_conditions:
+  - constraint: "CON-XXX"
+    paths: []
+    equivalence_meaning: ""
+    verification_method: ""
+covers: []                    # REQ-NNN and/or US-NNN
+source_refs: []
+status: draft
+unresolved: []

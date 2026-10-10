@@ -1,0 +1,26 @@
+# Учебный пример для демонстрации аргументированного покрытия.
+id: "REQ-EXAMPLE-001"
+title: "Загрузка конфигурации при запуске"
+type: structural
+statement: "Приложение читает конфигурационный файл при старте и применяет валидные параметры."
+covers:
+  - story: "US-EXAMPLE-001"
+    part: postcondition
+    argument: "Обеспечивает, что изменения допустимых параметров начинают влиять на приложение после следующего запуска."
+entities: ["project", "config_file"]
+actions: ["edit"]
+dom: project
+formalization:
+  status: semi_formal
+  constraints: []
+  diagrams: []
+status: draft
+source_refs: ["SRC-EXAMPLE-001"]
+priority: must
+unresolved: ["Формат и схема параметров должны быть определены."]
+related: []
+acceptance_criteria: ["Изменение валидного параметра меняет соответствующее поведение после перезапуска."]
+verification:
+  status: not_run
+  method: "Интеграционный тест запуска с временным конфигурационным файлом."
+  evidence: []

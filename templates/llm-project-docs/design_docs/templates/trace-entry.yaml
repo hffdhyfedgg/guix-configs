@@ -1,0 +1,35 @@
+# Одна запись для design/trace/nav-log.yaml -> entries
+id: "NAV-XXX"
+timestamp: ""                   # ISO 8601; пусто, если среда не предоставляет время
+type: decision                  # decision | conflict | decomposition | verification | rollback | observation
+trigger: ""
+decision_or_observation: ""
+rationale: ""
+affected: []                    # US/REQ/CON/COMM/STR IDs, glossary keys, component paths
+causal_edges:
+  - from: ""
+    relation: ""
+    to: ""
+source_refs: []
+status: open                    # open | resolved | superseded
+conflict:
+  class: ""                     # constraint_conflict | model_degradation | operation_inapplicability
+  constraints: []                # CON-NNN
+  minimality: unknown            # proven | unknown | not_applicable
+  loc:
+    mnc_size: null
+    affected_components: null
+    link_type: unknown           # within_component | boundary | global | unknown
+  evidence: []
+  resolution: ""
+basis: []
+residual:
+  status: ""                     # suspected | confirmed | resolved | rejected
+  symptom: ""
+  boundary: ""
+  evidence: []
+  next_action: ""
+rollback:
+  git_revision: ""
+  related_nav: []
+  reason: ""

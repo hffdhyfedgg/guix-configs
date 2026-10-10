@@ -1,0 +1,24 @@
+# Рабочий путь: design/floor2/constraints/CON-NNN.yaml
+# Создаётся только для отдельно формулируемого и проверяемого условия из REQ.
+id: "CON-XXX"
+requirement: "REQ-XXX"
+signature: {}                  # variable_name: glossary entity key/type
+predicate: ""
+dom: project
+witnesses: []
+counterexamples: []
+status: draft                  # draft | confirmed | deprecated
+source_refs: []
+diagram: null                  # COMM-NNN, if applicable
+decomposition:
+  kind: none                   # none | parent | child
+  parent: null                 # CON-NNN
+  children: []                 # CON-NNN
+  allocation: []               # local | boundary | global mapping
+verification:
+  status: not_run
+  level: L0                    # L0 | L1 | L2 | L3 | L4 | human | prototype | benchmark
+  method: ""
+  command_or_procedure: ""
+  evidence: []
+unresolved: []

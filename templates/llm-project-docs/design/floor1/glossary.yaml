@@ -1,0 +1,33 @@
+# Корневые понятия — встроенная часть схемы; конкретные понятия добавляются после изучения design/human/.
+roles:
+  system:
+    name: "Системный актор"
+    description: "Актор для действия, выполняемого самой системой; использовать только когда субъект подтверждён как системный."
+    aliases: []
+    status: confirmed
+    source_refs: ["design_docs/01-glossary.md#корневые-понятия-и-неопределённость"]
+    notes: ["Встроенная роль; не эквивалентна сущности system."]
+entities:
+  project:
+    name: "Проект"
+    description: "Весь проект, управляемый этой документационной структурой."
+    aliases: []
+    fixed: true
+    primitive: true
+    parts: []
+    status: confirmed
+    source_refs: ["design_docs/01-glossary.md#корневые-понятия-и-неопределённость"]
+    unresolved: []
+    notes: ["Корневая сущность; не декомпозировать без явного решения о границе проекта."]
+  system:
+    name: "Система"
+    description: "Система как целое, рассматриваемая как объект предметной области."
+    aliases: []
+    fixed: true
+    primitive: true
+    parts: []
+    status: confirmed
+    source_refs: ["design_docs/01-glossary.md#корневые-понятия-и-неопределённость"]
+    unresolved: []
+    notes: ["Отдельна от роли system."]
+actions: {}

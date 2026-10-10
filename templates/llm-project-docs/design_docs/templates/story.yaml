@@ -1,0 +1,16 @@
+# design/floor1/stories/US-NNN.yaml
+id: "US-XXX"
+type: atomic                  # atomic | scenario
+role: ""                      # ключ из glossary.roles; для системного актора — system
+object: ""                    # ключ из glossary.entities
+action: ""                    # ключ из glossary.actions
+precondition: []               # условия применимости; можно оставить []
+so_that: ""                    # желаемое состояние / постусловие / свойство
+motivation_type: consequence   # consequence | property
+rationale: ""                 # необязательно; польза, не заменяющая so_that
+source_refs: []                # SRC-NNN или устойчивые ссылки
+priority: must                 # must | should | could
+status: draft                  # draft | confirmed | deprecated
+related: []                    # US-NNN
+unresolved: []                 # открытые вопросы
+composed_of: []                # только для type: scenario, список US-NNN

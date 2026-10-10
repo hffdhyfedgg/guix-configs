@@ -1,0 +1,11 @@
+# Запись сущности для design/floor1/glossary.yaml -> entities
+name: ""
+description: ""
+aliases: []
+fixed: false                  # true только для корневого/защищённого понятия
+primitive: false              # true = осознанно неопределяемое, НЕ unresolved
+parts: []                     # понятийные части, не декомпозиция модулей
+status: draft                 # draft | confirmed | deprecated
+source_refs: []
+unresolved: []                # открытые вопросы об определении
+notes: []

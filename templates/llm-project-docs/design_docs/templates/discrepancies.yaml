@@ -1,0 +1,16 @@
+# design/trace/discrepancies.yaml
+# Рассогласования между документацией и кодом.
+# Заполняется p-assess-discrepancy.md и разбирается человеком.
+
+discrepancies: []
+# - id: DISC-001
+#   artifact: REQ-003
+#   code_location: src/module_1/parser.rs:42
+#   expected: "валидация входа перед парсингом"
+#   actual: "валидация отсутствует"
+#   severity: critical
+#   status: open
+#   rationale: ""
+#   resolution: ""
+#   resolved_by: ""
+#   resolved_at: ""

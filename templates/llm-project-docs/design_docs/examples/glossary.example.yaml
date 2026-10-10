@@ -1,0 +1,44 @@
+# Учебный пример; не переносить в рабочий глоссарий без подтверждения.
+roles:
+  operator:
+    name: "Оператор"
+    description: "Человек, который изменяет локальный конфигурационный файл."
+    aliases: []
+    status: confirmed
+    source_refs: ["SRC-EXAMPLE-001"]
+    notes: []
+entities:
+  project:
+    name: "Проект"
+    description: "Весь проект под управлением документации."
+    aliases: []
+    fixed: true
+    primitive: true
+    parts: []
+    status: confirmed
+    source_refs: ["design_docs/01-glossary.md#root-concepts"]
+    unresolved: []
+    notes: []
+  config_file:
+    name: "Файл конфигурации"
+    description: "Файл, содержащий параметры приложения; точная схема задаётся отдельным требованием."
+    aliases: ["config.yml"]
+    fixed: false
+    primitive: false
+    parts: []
+    status: confirmed
+    source_refs: ["SRC-EXAMPLE-001"]
+    unresolved: ["Какие ключи и типы параметров разрешены?"]
+    notes: ["Пример намеренно сохраняет открытый вопрос."]
+actions:
+  edit:
+    name: "Редактировать"
+    description: "Изменить содержимое файла конфигурации."
+    aliases: []
+    inputs: ["config_file"]
+    outputs: ["config_file"]
+    effects: ["filesystem_write"]
+    status: confirmed
+    source_refs: ["SRC-EXAMPLE-001"]
+    unresolved: []
+    notes: []

@@ -1,0 +1,8 @@
+# Покрытие исходного видения: каждый SRC-NNN получает disposition.
+sources: []
+# Пример элемента sources:
+# - id: SRC-001
+#   source: design/human/001-vision.md#heading-anchor
+#   disposition: covered        # covered | open_question | out_of_scope | duplicate | deferred | context_only | not_adopted
+#   covered_by: [US-001]
+#   rationale: ""

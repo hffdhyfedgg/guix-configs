@@ -207,6 +207,10 @@ fi
 if command -v starship >/dev/null 2>&1; then
   eval "$(starship init zsh)"
 fi
+if command -v direnv >/dev/null 2>&1; then
+  eval "$(direnv hook zsh)"
+fi
+
 
 # ---------------------------------------------------------------------------
 # Алиасы
@@ -249,22 +253,14 @@ alias rg='rg --color=auto'
 # --- Прочее ---
 alias cls='printf "\033[H\033[2J\033[3J"'
 
-# ---------------------------------------------------------------------------
-# Transient Prompt (Исправленный)
-# ---------------------------------------------------------------------------
-# Используем \r\e[2K, чтобы стереть ТОЛЬКО текущую строку ввода.
-# Это не поднимает курсор выше (\e[1A), поэтому вывод прошлых команд НЕ затирается.
-_transient_prompt_accept_line() {
-  local cmd=$BUFFER
-  # Очищаем текущую строку ввода
-  print -rn -- $'\r\e[2K'
 
-  # Печатаем символ приглашения и команду
-  if [[ -n "$cmd" ]]; then
-    print -rn -- "❯ $cmd"
-  fi
+# -------------------------
+# Transient Prompt
+# -------------------------
 
-  # Выполняем команду (zsh сам переведет курсор на новую строку для вывода)
-  zle .accept-line
+# Включает нативный transient prompt Starship
+elemental_starship_transient_prompt() {
+  echo -n "❯ "
 }
-zle -N accept-line _transient_prompt_accept_line
+# Starship поддерживает transient prompt из коробки:
+enable-starship-transient_prompt

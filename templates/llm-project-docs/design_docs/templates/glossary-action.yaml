@@ -1,0 +1,11 @@
+# Запись действия для design/floor1/glossary.yaml -> actions
+name: ""
+description: ""
+aliases: []
+inputs: []                    # ссылки на ключи entities / роли, если применимо
+outputs: []                   # ссылки на ключи entities
+effects: []                  # пример: filesystem_write, network, state_change
+status: draft
+source_refs: []
+unresolved: []
+notes: []

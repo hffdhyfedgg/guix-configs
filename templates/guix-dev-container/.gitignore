@@ -1,0 +1,7 @@
+# Пользовательский кэш контейнера
+container-home/.cache/
+container-home/.local/share/
+container-home/.local/state/
+
+# Guix
+.guix/
