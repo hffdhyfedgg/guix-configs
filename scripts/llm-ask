@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+"""llm-ask — отправка промпта на сервер llama.cpp из консоли.
+
+Читает текст запроса из стандартного ввода (stdin),
+отправляет его на HTTP-сервер llama.cpp (обычно запущенный через
+`python3 -m llama_cpp.server` или бинарный `llama-server`),
+и печатает сгенерированный ответ в стандартный вывод (stdout).
+
+Примеры:
+  echo "Объясни квантовую запутанность" | ./llm-ask
+  echo "Переведи на английский: привет" | ./llm-ask -p 8090 -t 0.3 -n 200
+  cat prompt.txt | ./llm-ask --system "Ты — поэт" --top-k 40 --stream
+"""
+
+import argparse
+import json
+import sys
+import urllib.request
+import urllib.error
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="llm-ask",
+        description=(
+            "Отправляет текст из stdin на сервер llama.cpp "
+            "и печатает ответ модели в stdout."
+        ),
+        epilog=(
+            "Примеры:\n"
+            "  echo 'Привет' | ./llm-ask\n"
+            "  echo 'Расскажи шутку' | ./llm-ask -p 8090 -t 0.8 -n 300\n"
+            "  cat task.txt | ./llm-ask --system 'Ты переводчик' --stream\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    # --- подключение ---
+    conn = p.add_argument_group("Подключение к серверу")
+    conn.add_argument(
+        "--host", default="127.0.0.1",
+        help="Адрес сервера (по умолчанию: 127.0.0.1)",
+    )
+    conn.add_argument(
+        "-p", "--port", type=int, default=8080,
+        help="Порт сервера (по умолчанию: 8080)",
+    )
+    conn.add_argument(
+        "--endpoint", default="/completion",
+        choices=["/completion", "/v1/chat/completions"],
+        help=(
+            "HTTP-эндпоинт сервера. "
+            "/completion — «сырой» режим; "
+            "/v1/chat/completions — режим диалога в стиле OpenAI "
+            "(по умолчанию: /completion)"
+        ),
+    )
+
+    # --- генерация ---
+    gen = p.add_argument_group("Параметры генерации")
+    gen.add_argument(
+        "-n", "--n-predict", type=int, default=512,
+        help="Максимум генерируемых токенов (по умолчанию: 512)",
+    )
+    gen.add_argument(
+        "-t", "--temperature", type=float, default=0.8,
+        help="Температура выборки: 0 — детерминированно, >1 — хаотично "
+             "(по умолчанию: 0.8)",
+    )
+    gen.add_argument(
+        "--top-k", type=int, default=40,
+        help="Учитывать только top-k наиболее вероятных токенов "
+             "(по умолчанию: 40)",
+    )
+    gen.add_argument(
+        "--top-p", type=float, default=0.95,
+        help="Ядерная выборка (nucleus sampling): порог кумулятивной "
+             "вероятности (по умолчанию: 0.95)",
+    )
+    gen.add_argument(
+        "--repeat-penalty", type=float, default=1.1,
+        help="Штраф за повторение токенов (по умолчанию: 1.1)",
+    )
+    gen.add_argument(
+        "--repeat-last-n", type=int, default=64,
+        help="Окно (в токенах), в котором считается штраф за повторы "
+             "(по умолчанию: 64)",
+    )
+    gen.add_argument(
+        "--mirostat", type=int, default=0, choices=[0, 1, 2],
+        help="Режим mirostat-семплинга: 0 — выкл, 1 — v1, 2 — v2 "
+             "(по умолчанию: 0)",
+    )
+    gen.add_argument(
+        "--mirostat-tau", type=float, default=5.0,
+        help="Целевая «перплексия» для mirostat (по умолчанию: 5.0)",
+    )
+    gen.add_argument(
+        "--mirostat-eta", type=float, default=0.1,
+        help="Скорость обучения mirostat (по умолчанию: 0.1)",
+    )
+    gen.add_argument(
+        "--seed", type=int, default=-1,
+        help="Зерно ГПСЧ; -1 — случайное (по умолчанию: -1)",
+    )
+    gen.add_argument(
+        "--grammar", default=None,
+        help="Файл с GBNF-грамматикой, ограничивающей формат вывода",
+    )
+
+    # --- промпт ---
+    pr = p.add_argument_group("Промпт")
+    pr.add_argument(
+        "-s", "--system", default="",
+        help="Системный промпт (роль модели)",
+    )
+    pr.add_argument(
+        "--stop", nargs="*", default=None,
+        help="Стоп-последовательности: генерация прервётся при их появлении",
+    )
+    pr.add_argument(
+        "--n-keep", type=int, default=0,
+        help="Число начальных токенов промпта, которые не удаляются "
+             "при переполнении контекста (по умолчанию: 0)",
+    )
+
+    # --- вывод ---
+    out = p.add_argument_group("Вывод")
+    out.add_argument(
+        "--stream", action="store_true",
+        help="Печатать ответ по мере генерации (потоковый режим)",
+    )
+    out.add_argument(
+        "--raw", action="store_true",
+        help="Вывести «сырой» JSON-ответ сервера вместо текста",
+    )
+
+    return p
+
+
+def read_stdin() -> str:
+    if sys.stdin.isatty():
+        print("Ожидание ввода (завершите сочетанием Ctrl+D):", file=sys.stderr)
+    return sys.stdin.read().strip()
+
+
+def build_completion_payload(args, prompt: str) -> dict:
+    """Тело запроса для /completion."""
+    body: dict = {
+        "prompt": prompt,
+        "n_predict": args.n_predict,
+        "temperature": args.temperature,
+        "top_k": args.top_k,
+        "top_p": args.top_p,
+        "repeat_penalty": args.repeat_penalty,
+        "repeat_last_n": args.repeat_last_n,
+        "mirostat": args.mirostat,
+        "mirostat_tau": args.mirostat_tau,
+        "mirostat_eta": args.mirostat_eta,
+        "seed": args.seed,
+        "stream": args.stream,
+        "stop": args.stop or [],
+        "n_keep": args.n_keep,
+    }
+    if args.system:
+        body["system_prompt"] = args.system
+    if args.grammar:
+        with open(args.grammar, "r", encoding="utf-8") as f:
+            body["grammar"] = f.read()
+    return body
+
+
+def build_chat_payload(args, prompt: str) -> dict:
+    """Тело запроса для /v1/chat/completions."""
+    messages = []
+    if args.system:
+        messages.append({"role": "system", "content": args.system})
+    messages.append({"role": "user", "content": prompt})
+    return {
+        "messages": messages,
+        "max_tokens": args.n_predict,
+        "temperature": args.temperature,
+        "top_k": args.top_k,
+        "top_p": args.top_p,
+        "repeat_penalty": args.repeat_penalty,
+        "seed": args.seed,
+        "stream": args.stream,
+        "stop": args.stop or [],
+    }
+
+
+def send_request(url: str, payload: dict, stream: bool):
+    """Отправляет POST-запрос; возвращает объект ответа."""
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        resp = urllib.request.urlopen(req)
+    except urllib.error.URLError as e:
+        print(f"Ошибка подключения: {e}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.HTTPError as e:
+        print(f"HTTP {e.code}: {e.read().decode()}", file=sys.stderr)
+        sys.exit(1)
+    return resp
+
+
+def print_completion_response(resp, raw: bool):
+    """Обрабатывает ответ /completion."""
+    if raw:
+        print(resp.read().decode("utf-8"))
+        return
+    body = json.loads(resp.read().decode("utf-8"))
+    print(body.get("content", ""), end="")
+    if not body.get("content", "").endswith("\n"):
+        print()
+
+
+def print_completion_stream(resp, raw: bool):
+    """Потоковая обработка /completion (SSE)."""
+    for line in resp:
+        line = line.decode("utf-8").strip()
+        if not line.startswith("data: "):
+            continue
+        data_str = line[len("data: "):]
+        if data_str == "[DONE]":
+            break
+        chunk = json.loads(data_str)
+        if raw:
+            print(data_str, file=sys.stderr)
+        print(chunk.get("content", ""), end="", flush=True)
+    print()
+
+
+def print_chat_response(resp, raw: bool):
+    """Обрабатывает ответ /v1/chat/completions."""
+    if raw:
+        print(resp.read().decode("utf-8"))
+        return
+    body = json.loads(resp.read().decode("utf-8"))
+    content = body["choices"][0]["message"]["content"]
+    print(content)
+
+
+def print_chat_stream(resp, raw: bool):
+    """Потоковая обработка /v1/chat/completions (SSE)."""
+    for line in resp:
+        line = line.decode("utf-8").strip()
+        if not line.startswith("data: "):
+            continue
+        data_str = line[len("data: "):]
+        if data_str == "[DONE]":
+            break
+        chunk = json.loads(data_str)
+        if raw:
+            print(data_str, file=sys.stderr)
+        delta = chunk["choices"][0].get("delta", {})
+        print(delta.get("content", ""), end="", flush=True)
+    print()
+
+
+def main():
+    args = build_parser().parse_args()
+    prompt = read_stdin()
+    if not prompt:
+        print("Пустой ввод — нечего отправлять.", file=sys.stderr)
+        sys.exit(1)
+
+    url = f"http://{args.host}:{args.port}{args.endpoint}"
+
+    if args.endpoint == "/v1/chat/completions":
+        payload = build_chat_payload(args, prompt)
+    else:
+        payload = build_completion_payload(args, prompt)
+
+    resp = send_request(url, payload, stream=args.stream)
+
+    # --- вывод ---
+    if args.endpoint == "/v1/chat/completions":
+        if args.stream:
+            print_chat_stream(resp, args.raw)
+        else:
+            print_chat_response(resp, args.raw)
+    else:
+        if args.stream:
+            print_completion_stream(resp, args.raw)
+        else:
+            print_completion_response(resp, args.raw)
+
+
+if __name__ == "__main__":
+    main()
