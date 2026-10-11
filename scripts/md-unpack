@@ -2,124 +2,207 @@
 """
 unpack_code_blocks.py
 
-Парсит поток с markdown-блоками кода и раскладывает
-содержимое по файлам. Путь к файлу берётся из первой строки
-блока (строка-комментарий).
+Распаковывает файлы из markdown-блоков кода.
+Поддерживает несколько шаблонов извлечения (см. --config).
 
-Источник по умолчанию — стандартный ввод (stdin).
-Флаг -f / --file переключает на чтение из файла.
+Источник по умолчанию — stdin. Флаг -f переключает на файл.
 
 Использование:
     cat dump.md | python unpack_code_blocks.py -o ./project
-    python unpack_code_blocks.py -f dump.md -o ./project
-    python unpack_code_blocks.py -f dump.md --dry-run
+    python unpack_code_blocks.py -f dump.md -o ./project --dry-run
+    python unpack_code_blocks.py -f dump.md --config my_templates.json
 """
 
 import argparse
-import os
+import json
 import re
 import sys
 from pathlib import Path
 
-# ──────────────────────────────────────────────
-# 1. Распознавание «строки-пути» в комментарии
-# ──────────────────────────────────────────────
 
-_PATH_PATTERNS: list[tuple[re.Pattern, int]] = [
-    # <!-- path -->
-    (re.compile(r"^\s*<!--\s*(.+?)\s*-->\s*$"), 1),
-    # /* path */
-    (re.compile(r"^\s*/\*\s*(.+?)\s*\*/\s*$"), 1),
-    # // path
-    (re.compile(r"^\s*//\s*(.+?)\s*$"), 1),
-    # # path
-    (re.compile(r"^\s*#\s*(.+?)\s*$"), 1),
-    # -- path
-    (re.compile(r"^\s*--\s*(.+?)\s*$"), 1),
-    # % path
-    (re.compile(r"^\s*%\s*(.+?)\s*$"), 1),
-    # ; path
-    (re.compile(r"^\s*;\s*(.+?)\s*$"), 1),
+# ══════════════════════════════════════════════
+#  Структура данных
+# ══════════════════════════════════════════════
+
+class Block:
+    """Один извлечённый файл."""
+    __slots__ = ("path", "lang", "body", "template")
+
+    def __init__(self, path: str, lang: str, body: str, template: str):
+        self.path = path
+        self.lang = lang
+        self.body = body
+        self.template = template
+
+    def __repr__(self):
+        return f"Block(path={self.path!r}, lang={self.lang!r}, tpl={self.template!r})"
+
+
+# ══════════════════════════════════════════════
+#  Шаблоны извлечения
+# ══════════════════════════════════════════════
+
+# --- Вспомогательные регулярки для комментариев ---
+_COMMENT_PATTERNS: list[re.Pattern] = [
+    re.compile(r"^\s*<!--\s*(.+?)\s*-->\s*$"),
+    re.compile(r"^\s*/\*\s*(.+?)\s*\*/\s*$"),
+    re.compile(r"^\s*//\s*(.+?)\s*$"),
+    re.compile(r"^\s*#\s*(.+?)\s*$"),
+    re.compile(r"^\s*--\s*(.+?)\s*$"),
+    re.compile(r"^\s*%\s*(.+?)\s*$"),
+    re.compile(r"^\s*;\s*(.+?)\s*$"),
 ]
 
 
-def extract_path(line: str) -> str | None:
-    """Возвращает путь из строки-комментария или None."""
-    for pattern, group in _PATH_PATTERNS:
-        m = pattern.match(line)
+def _extract_comment_path(line: str) -> str | None:
+    for pat in _COMMENT_PATTERNS:
+        m = pat.match(line)
         if m:
-            return m.group(group).strip()
+            return m.group(1).strip()
     return None
 
 
-# ──────────────────────────────────────────────
-# 2. Разбиение текста на блоки кода
-# ──────────────────────────────────────────────
-
-_BLOCK_RE = re.compile(
-    r"^```([^\n]*)\n"
-    r"(.*?)"
-    r"^```\s*$",
+# --- Шаблон 1: путь в комментарии на первой строке блока ---
+_RE_CODE_BLOCK = re.compile(
+    r"^```([^\n]*)\n(.*?)^```\s*$",
     re.MULTILINE | re.DOTALL,
 )
 
 
-def parse_blocks(text: str) -> list[dict]:
+def parse_comment_path(text: str) -> list[Block]:
     results = []
-    for m in _BLOCK_RE.finditer(text):
+    for m in _RE_CODE_BLOCK.finditer(text):
         lang = m.group(1).strip()
         body = m.group(2)
-
         lines = body.split("\n")
         if not lines:
             continue
-
-        file_path = extract_path(lines[0])
-        if file_path is None:
+        fpath = _extract_comment_path(lines[0])
+        if fpath is None:
             continue
-
         content = "\n".join(lines[1:])
         if content.startswith("\n"):
             content = content[1:]
-
-        results.append({"lang": lang, "path": file_path, "body": content})
-
+        results.append(Block(path=fpath, lang=lang, body=content, template="comment-path"))
     return results
 
 
-# ──────────────────────────────────────────────
-# 3. Запись файлов на диск
-# ──────────────────────────────────────────────
+# --- Шаблон 2: путь в заголовке над блоком ---
+# Ловим:  ## `путь`  \n  ```lang\n...\n```
+_RE_HEADING_BLOCK = re.compile(
+    r"^#{1,6}\s+`([^`]+)`\s*\n+"   # заголовок с путём в обратных кавычках
+    r"```([^\n]*)\n"                # открывающее ограждение
+    r"(.*?)"                        # тело
+    r"^```\s*$",                    # закрывающее ограждение
+    re.MULTILINE | re.DOTALL,
+)
 
-def write_files(blocks: list[dict], out_dir: Path, dry_run: bool) -> None:
+
+def parse_heading_path(text: str) -> list[Block]:
+    results = []
+    for m in _RE_HEADING_BLOCK.finditer(text):
+        fpath = m.group(1).strip()
+        lang = m.group(2).strip()
+        body = m.group(3)
+        if body.endswith("\n"):
+            body = body[:-1]
+        results.append(Block(path=fpath, lang=lang, body=body, template="heading-path"))
+    return results
+
+
+# --- Реестр встроенных шаблонов ---
+_BUILTIN_TEMPLATES: dict[str, callable] = {
+    "comment-path": parse_comment_path,
+    "heading-path": parse_heading_path,
+}
+
+
+# ══════════════════════════════════════════════
+#  Загрузка пользовательских шаблонов из JSON
+# ══════════════════════════════════════════════
+
+def _compile_user_template(tpl: dict) -> callable:
+    """
+    Компилирует описание из JSON в функцию-парсер.
+
+    Ожидаемые поля:
+      "regex"       — строка-регулярка (MULTILINE|DOTALL)
+      "path_group"  — номер группы с путём (1-индексация)
+      "lang_group"  — номер группы с языком (0 если нет)
+      "body_group"  — номер группы с телом
+      "strip_first" — true: убрать первую строку тела (комментарий-путь)
+    """
+    pattern = re.compile(tpl["regex"], re.MULTILINE | re.DOTALL)
+    pg = tpl["path_group"]
+    lg = tpl.get("lang_group", 0)
+    bg = tpl["body_group"]
+    strip_first = tpl.get("strip_first", False)
+
+    def parser(text: str) -> list[Block]:
+        results = []
+        for m in pattern.finditer(text):
+            fpath = m.group(pg).strip()
+            lang = m.group(lg).strip() if lg else ""
+            body = m.group(bg)
+            if strip_first:
+                lines = body.split("\n")
+                body = "\n".join(lines[1:])
+            if body.startswith("\n"):
+                body = body[1:]
+            if body.endswith("\n"):
+                body = body[:-1]
+            results.append(Block(path=fpath, lang=lang, body=body, template=tpl.get("name", "custom")))
+        return results
+
+    return parser
+
+
+def load_config(path: str) -> dict[str, callable]:
+    """Загружает JSON-конфиг, возвращает словарь имя→парсер."""
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    templates = {}
+    for tpl in data.get("templates", []):
+        name = tpl["name"]
+        templates[name] = _compile_user_template(tpl)
+    return templates
+
+
+# ══════════════════════════════════════════════
+#  Основной пайплайн
+# ══════════════════════════════════════════════
+
+def parse_all(text: str, templates: dict[str, callable]) -> list[Block]:
+    """Прогоняет текст через все активные шаблоны, убирает дубли."""
+    seen: set[str] = set()
+    results: list[Block] = []
+    for name, fn in templates.items():
+        for blk in fn(text):
+            if blk.path not in seen:
+                seen.add(blk.path)
+                results.append(blk)
+    return results
+
+
+def write_files(blocks: list[Block], out_dir: Path, dry_run: bool) -> None:
     for blk in blocks:
-        target = out_dir / blk["path"]
-
+        target = out_dir / blk.path
         if dry_run:
-            print(f"  [dry] {target}")
+            print(f"  [dry] {target}  ({blk.template})")
             continue
-
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(blk["body"], encoding="utf-8")
-        print(f"  ✓ {target}")
+        target.write_text(blk.body, encoding="utf-8")
+        print(f"  ✓ {target}  ({blk.template})")
 
-
-# ──────────────────────────────────────────────
-# 4. Чтение источника: файл или stdin
-# ──────────────────────────────────────────────
 
 def read_source(file_path: str | None) -> str:
-    """
-    Если file_path задан — читаем файл.
-    Иначе читаем стандартный ввод (stdin).
-    """
     if file_path is not None:
         p = Path(file_path)
         if not p.is_file():
             sys.exit(f"Ошибка: файл не найден: {p}")
         return p.read_text(encoding="utf-8")
 
-    # stdin: читаем всё, что пришло в поток
     if sys.stdin.isatty():
         sys.exit(
             "Ошибка: вход не задан.\n"
@@ -129,38 +212,40 @@ def read_source(file_path: str | None) -> str:
     return sys.stdin.read()
 
 
-# ──────────────────────────────────────────────
-# 5. Точка входа
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
+#  Точка входа
+# ══════════════════════════════════════════════
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description=(
-            "Распаковывает файлы из markdown-блоков кода.\n"
-            "По умолчанию читает стандартный ввод (stdin)."
-        ),
+        description="Распаковывает файлы из markdown-блоков кода.",
     )
-    ap.add_argument(
-        "-f", "--file",
-        default=None,
-        metavar="PATH",
-        help="Читать из файла вместо stdin",
-    )
-    ap.add_argument(
-        "-o", "--output",
-        default=".",
-        metavar="DIR",
-        help="Корневой каталог для записи (по умолчанию — текущий)",
-    )
-    ap.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Только показать, что будет создано, не писать на диск",
-    )
+    ap.add_argument("-f", "--file", default=None, metavar="PATH",
+                    help="Читать из файла вместо stdin")
+    ap.add_argument("-o", "--output", default=".", metavar="DIR",
+                    help="Корневой каталог для записи (по умолчанию — текущий)")
+    ap.add_argument("--config", default=None, metavar="JSON",
+                    help="Путь к JSON с дополнительными шаблонами")
+    ap.add_argument("--templates", default=None, metavar="LIST",
+                    help="Список шаблонов через запятую (по умолчанию все)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Только показать, что будет создано")
     args = ap.parse_args()
 
+    # Собираем активные шаблоны
+    templates: dict[str, callable] = dict(_BUILTIN_TEMPLATES)
+    if args.config:
+        templates.update(load_config(args.config))
+
+    # Фильтрация по --templates
+    if args.templates:
+        names = {s.strip() for s in args.templates.split(",")}
+        templates = {k: v for k, v in templates.items() if k in names}
+        if not templates:
+            sys.exit(f"Ошибка: ни один шаблон не найден среди: {args.templates}")
+
     text = read_source(args.file)
-    blocks = parse_blocks(text)
+    blocks = parse_all(text, templates)
 
     if not blocks:
         print("Блоков с путями не найдено.")
