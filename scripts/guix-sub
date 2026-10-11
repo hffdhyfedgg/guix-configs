@@ -1,0 +1,3 @@
+#!/bin/sh
+guix "$@"  \
+    --substitute-urls="https://bordeaux.guix.gnu.org https://mirror.yandex.ru/mirrors/guix https://guix.bordeaux.inria.fr/" # https://substitutes.nonguix.org

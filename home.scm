@@ -30,48 +30,38 @@
 (home-environment
   (packages
    (list
-       ; Программы
-       librewolf
-       keepassxc
-       ; ГИП
-       btop
-       fuzzel
+
        ; Консольный ИП
-       starship zoxide atuin fzf
+       starship atuin fzf
        zsh-autosuggestions zsh-syntax-highlighting
        fzf-tab zsh-completions direnv
        ; Консольные утилитыe
-       eza sd fd trash-cli ripgrep bat plocate
+       eza sd fd trash-cli ripgrep bat plocate zoxide
        ; Программирование: ПО
-       git
-       zed
        ; Программирование: наборы разработчиков
 
        ; Другое
        my-scripts
-       font-nerd-jetbrains-mono
     ))
 
   (services
    (list
     (service home-xdg-configuration-files-service-type
-     `(("labwc/autostart"   ,(local-file "labwc/autostart"))
-       ("labwc/environment" ,(local-file "labwc/environment"))
-       ("labwc/rc.xml"      ,(local-file "labwc/rc.xml"))
-       ("waybar/config"     ,(local-file "waybar/config"))
-       ("waybar/style.css"  ,(local-file "waybar/style.css"))
-       ("sway/config"       ,(local-file "sway/config"))
-       ("fuzzel/fuzzel.ini" ,(local-file "fuzzel/fuzzel.ini"))
+     `(
        ("zed/settings.json" ,(local-file "zed/settings.json"))
        ("starship.toml" ,(local-file "starship/starship.toml"))
+       ("guix/channels.scm" ,(local-file "guix/channels.scm"))
        ))
 
-    (simple-service 'my-fonts
-        home-fontconfig-service-type
-        (list
-         '(alias
-          (family "monospace")
-          (prefer (family "JetBrainsMono Nerd Font")))))
+
+
+        (simple-service 'my-template-symlink
+                        home-files-service-type
+                        (list
+                        ;; list, а НЕ cons!
+                        (list "Шаблоны"
+                              (local-file "templates" #:recursive? #t))))
+
 
     (simple-service 'my-env-vars
                     home-environment-variables-service-type
@@ -80,13 +70,9 @@
                     '(("LANG"                . "ru_RU.UTF-8")
                       ("LC_ALL"              . "ru_RU.UTF-8")
                       ("LC_CTYPE"            . "ru_RU.UTF-8")
-                      ("XDG_SESSION_TYPE"    . "wayland")
-                      ("XDG_CURRENT_DESKTOP" . "wlroots")
-                      ("MOZ_ENABLE_WAYLAND"  . "1")
-                      ("QT_QPA_PLATFORM"     . "wayland")
-                      ("SDL_VIDEODRIVER"     . "wayland")
-                      ("EDITOR"              . "nvim")
-                      ("VISUAL"              . "zed")))
+                      ; ("XDG_SESSION_TYPE"    . "wayland")
+                      ; ("XDG_CURRENT_DESKTOP" . "wlroots")
+                      ))
 
     (service home-zsh-service-type
              (home-zsh-configuration
@@ -95,8 +81,8 @@
               (zprofile (list (local-file "zsh/zprofile")))
               (zlogin (list (local-file "zsh/zlogin")))))
 
-    (service home-syncthing-service-type)
-    ; (my-xray-service)
-    )
-   )
+    ); list
+   ); services
   )
+
+
